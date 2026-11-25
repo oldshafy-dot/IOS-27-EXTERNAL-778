@@ -371,15 +371,15 @@ private struct FunctionsView: View {
                         } label: {
                             Text(games[index].0)
                                 .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(game == index ? .white : .secondary)
+                                .foregroundStyle(.black)
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 12)
-                                .background(
-                                    game == index
-                                        ? accent.opacity(0.20)
-                                        : Color.white.opacity(0.06)
-                                )
+                                .background(Color.white)
                                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                .shadow(
+                                    color: game == index ? Color.white.opacity(0.18) : Color.clear,
+                                    radius: game == index ? 8 : 0
+                                )
                         }
                     }
                 }
@@ -427,20 +427,21 @@ private struct PatchCard: View {
     var body: some View {
         HStack(spacing: 14) {
             Circle()
-                .fill(accent.opacity(0.10))
+                .fill(Color.black.opacity(0.08))
                 .frame(width: 48, height: 48)
                 .overlay {
                     Image(systemName: "scope")
-                        .foregroundStyle(accent)
+                        .foregroundStyle(.black)
                 }
 
             VStack(alignment: .leading, spacing: 5) {
                 Text(patch.name)
                     .font(.headline)
+                    .foregroundStyle(.black)
 
                 Text(state ?? (patch.has_file ? "Preparing…" : "Unavailable"))
                     .font(.caption)
-                    .foregroundStyle(.white.opacity(0.65))
+                    .foregroundStyle(.black.opacity(0.60))
             }
 
             Spacer()
@@ -455,17 +456,17 @@ private struct PatchCard: View {
                     .tint(accent)
                     Text(enabled ? "ON" : "OFF")
                         .font(.caption2.weight(.bold))
-                        .foregroundStyle(enabled ? accent : .white.opacity(0.55))
+                        .foregroundStyle(.black.opacity(enabled ? 1.0 : 0.55))
                 }
             } else if state == "Downloading…" || state == "Retrying…" {
                 ProgressView()
             } else {
                 Image(systemName: patch.has_file ? "arrow.down.circle" : "circle.dashed")
-                    .foregroundStyle(.white.opacity(0.65))
+                    .foregroundStyle(.black.opacity(0.60))
             }
         }
         .padding(16)
-        .background(Color.black.opacity(0.58))
+        .background(Color.white)
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
