@@ -185,7 +185,7 @@ struct ContentView: View {
     @State private var game = 0
     @State private var key = ""
     @State private var showKey = false
-    @State private var accent = Color(red: 0.25, green: 0.65, blue: 1.0)
+    @State private var accent = Color.white
         @State private var showChangeLicense = false
 
     private var storedKey: String {
@@ -243,7 +243,7 @@ struct ContentView: View {
             .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .stroke(Color.white.opacity(0.015), lineWidth: 1)
+                    .stroke(Color.clear, lineWidth: 0)
             }
             .padding(.horizontal, 12)
             .padding(.bottom, 18)
@@ -259,7 +259,7 @@ struct ContentView: View {
                     .font(.system(size: 40, weight: .heavy, design: .rounded))
 
                 Text("Play Beyond Limits")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.white.opacity(0.65))
 
                 VStack(spacing: 14) {
                     HStack(spacing: 12) {
@@ -279,11 +279,11 @@ struct ContentView: View {
                         }
                     }
                     .padding(16)
-                    .background(.ultraThinMaterial.opacity(0.16))
+                    .background(Color.black.opacity(0.72))
                     .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                     .overlay {
                         RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .stroke(Color.white.opacity(0.035), lineWidth: 1)
+                            .stroke(Color.clear, lineWidth: 0)
                     }
 
                     Button {
@@ -310,7 +310,7 @@ struct ContentView: View {
 
                 Text("Supported: iOS 16 and newer")
                     .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.white.opacity(0.65))
 
                 Spacer(minLength: 40)
             }
@@ -338,7 +338,7 @@ private struct FunctionsView: View {
 
                 Text("Functions")
                     .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.white.opacity(0.65))
 
                 VideoBanner()
                     .frame(height: 165)
@@ -358,7 +358,7 @@ private struct FunctionsView: View {
                                 .background(
                                     game == index
                                         ? accent.opacity(0.20)
-                                        : Color.white.opacity(0.055)
+                                        : Color.white.opacity(0.06)
                                 )
                                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                         }
@@ -415,7 +415,7 @@ private struct PatchCard: View {
 
                 Text(state ?? (patch.has_file ? "Preparing…" : "Unavailable"))
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.white.opacity(0.65))
             }
 
             Spacer()
@@ -427,15 +427,15 @@ private struct PatchCard: View {
                 ProgressView()
             } else {
                 Image(systemName: patch.has_file ? "arrow.down.circle" : "circle.dashed")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.white.opacity(0.65))
             }
         }
         .padding(16)
-        .background(.ultraThinMaterial.opacity(0.10))
+        .background(Color.black.opacity(0.58))
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(Color.white.opacity(0.025), lineWidth: 1)
+                .stroke(Color.clear, lineWidth: 0)
         }
     }
 }
@@ -445,14 +445,14 @@ private struct EmptyPatchCard: View {
         VStack(spacing: 8) {
             Image(systemName: "square.stack.3d.up.slash")
                 .font(.title2)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.white.opacity(0.65))
 
             Text("No patches available")
                 .font(.headline)
 
             Text("New online patches will appear here automatically.")
                 .font(.footnote)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.white.opacity(0.65))
                 .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
@@ -476,7 +476,7 @@ private struct AccountView: View {
                     .font(.system(size: 32, weight: .bold, design: .rounded))
 
                 Text("Play Beyond Limits")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.white.opacity(0.65))
 
                 accountSection("DEVICE") {
                     InfoRow(title: "Device supported", value: "Supported", icon: "checkmark.shield.fill", accent: accent)
@@ -490,7 +490,7 @@ private struct AccountView: View {
                         VStack(alignment: .leading, spacing: 5) {
                             Text("License Key")
                                 .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(.white.opacity(0.65))
 
                             Text(reveal ? (api.license?.key ?? storedKey) : "••••••••••••••••")
                                 .font(.system(.body, design: .monospaced))
@@ -514,13 +514,13 @@ private struct AccountView: View {
                     if let days = api.license?.days_remaining {
                         Text(days == 1 ? "1 day remaining" : "\(days) days remaining")
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.white.opacity(0.65))
                     }
 
                     if let expiry = api.license?.expires_at {
                         Text("Expiry: \(expiry)")
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.white.opacity(0.65))
                     }
 
                     Button("Change License") {
@@ -552,7 +552,7 @@ private struct AccountView: View {
         VStack(alignment: .leading, spacing: 9) {
             Text(title)
                 .font(.caption.weight(.bold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.white.opacity(0.65))
 
             VStack(spacing: 0) {
                 content()
@@ -619,7 +619,7 @@ private struct RuntimeView: View {
                 .font(.system(size: 32, weight: .bold, design: .rounded))
 
             Text("Runtime logs")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.white.opacity(0.65))
 
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .fill(Color.clear)
@@ -631,7 +631,7 @@ private struct RuntimeView: View {
                             .foregroundStyle(accent)
 
                         Text("No runtime events yet")
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.white.opacity(0.65))
                     }
                 }
 
@@ -659,7 +659,7 @@ private struct SettingsViewRobo: View {
                     ColorPicker("Accent Color", selection: $accent, supportsOpacity: false)
                     Text("ROBO uses its custom dark appearance and ignores the system Light/Dark setting.")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.white.opacity(0.65))
                 }
 
                 settingsSection("LANGUAGE") {
@@ -688,7 +688,7 @@ private struct SettingsViewRobo: View {
         VStack(alignment: .leading, spacing: 9) {
             Text(title)
                 .font(.caption.weight(.bold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.white.opacity(0.65))
 
             VStack(alignment: .leading, spacing: 14) {
                 content()
@@ -716,7 +716,7 @@ private struct InfoRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.white.opacity(0.65))
 
                 Text(value)
                     .font(.subheadline)
@@ -801,7 +801,7 @@ private struct VideoBanner: View {
                         .font(.title.bold())
                     Text("Play Beyond Limits")
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.white.opacity(0.65))
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(20)
