@@ -241,11 +241,11 @@ struct ContentView: View {
                 RoboTab(title: "Settings", icon: "gearshape.fill", selected: tab == 3, accent: accent) { tab = 3 }
             }
             .padding(8)
-            .background(Color.white.opacity(0.045))
+            .background(Color.clear)
             .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .stroke(Color.white.opacity(0.035), lineWidth: 1)
+                    .stroke(Color.white.opacity(0.015), lineWidth: 1)
             }
             .padding(.horizontal, 12)
             .padding(.bottom, 8)
@@ -281,7 +281,7 @@ struct ContentView: View {
                         }
                     }
                     .padding(16)
-                    .background(Color.white.opacity(0.055))
+                    .background(Color.clear)
                     .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
 
                     Button {
@@ -428,11 +428,11 @@ private struct PatchCard: View {
             }
         }
         .padding(16)
-        .background(Color.white.opacity(0.055))
+        .background(Color.clear)
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(Color.white.opacity(0.025), lineWidth: 1)
+                .stroke(Color.white.opacity(0.012), lineWidth: 1)
         }
     }
 }
@@ -454,7 +454,7 @@ private struct EmptyPatchCard: View {
         }
         .frame(maxWidth: .infinity)
         .padding(32)
-        .background(Color.white.opacity(0.045))
+        .background(Color.clear)
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
 }
@@ -555,11 +555,11 @@ private struct AccountView: View {
                 content()
             }
             .padding(4)
-            .background(Color.white.opacity(0.045))
+            .background(Color.clear)
             .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .stroke(Color.white.opacity(0.02), lineWidth: 1)
+                    .stroke(Color.white.opacity(0.01), lineWidth: 1)
             }
         }
     }
@@ -581,7 +581,7 @@ private struct ChangeLicenseView: View {
                 TextField("ROBO license key", text: $key)
                     .textInputAutocapitalization(.characters)
                     .padding(14)
-                    .background(Color.white.opacity(0.055))
+                    .background(Color.clear)
                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
 
                 Button("Verify") {
@@ -620,7 +620,7 @@ private struct RuntimeView: View {
                 .foregroundStyle(.secondary)
 
             RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(Color.white.opacity(0.045))
+                .fill(Color.clear)
                 .frame(maxWidth: .infinity, minHeight: 220)
                 .overlay {
                     VStack(spacing: 8) {
@@ -704,7 +704,7 @@ private struct SettingsViewRobo: View {
             }
             .padding(15)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.white.opacity(0.045))
+            .background(Color.clear)
             .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         }
     }
