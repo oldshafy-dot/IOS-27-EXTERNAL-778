@@ -607,7 +607,7 @@ private struct ChangeLicenseView: View {
             }
             .padding(20)
         }
-            }
+    }
 }
 
 private struct RuntimeView: View {
