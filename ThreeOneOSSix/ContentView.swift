@@ -1,7 +1,7 @@
 import SwiftUI
 import UIKit
+import AVKit
 
-// ROBO iOS client UI. This client uses only the public license and patch-option APIs.
 private let roboAPIBase = URL(string: "https://shafaykeyauthadmin.lovable.app")!
 
 struct RoboLicenseResponse: Codable {
@@ -43,35 +43,51 @@ final class RoboAPI: ObservableObject {
     @Published var patches: [RoboPatchOption] = []
     @Published var isLoading = false
     @Published var errorMessage: String?
+    @Published var patchDownloadState: [String: String] = [:]
 
     func verify(key: String) async {
         isLoading = true
         errorMessage = nil
         defer { isLoading = false }
+
         do {
             var request = URLRequest(url: roboAPIBase.appendingPathComponent("api/public/v1/verify-license"))
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            let body: [String: String] = [
+            request.httpBody = try JSONEncoder().encode([
                 "key": key.trimmingCharacters(in: .whitespacesAndNewlines),
                 "device_id": RoboDevice.id,
                 "product_identifier": "freefire"
-            ]
-            request.httpBody = try JSONEncoder().encode(body)
+            ])
+
             let (data, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            guard let http = response as? HTTPURLResponse else {
                 throw URLError(.badServerResponse)
             }
+
             let result = try JSONDecoder().decode(RoboLicenseResponse.self, from: data)
             license = result
+
             guard result.valid == true, result.status?.lowercased() == "active" else {
-                throw RoboError.invalidLicense
+                let status = result.status?.lowercased() ?? ""
+                if status == "expired" {
+                    errorMessage = "License Expired"
+                } else if status == "revoked" {
+                    errorMessage = "License Revoked"
+                } else {
+                    errorMessage = "Invalid Key"
+                }
+                UserDefaults.standard.removeObject(forKey: "robo.license.key")
+                UserDefaults.standard.removeObject(forKey: "robo.license.expiry")
+                return
             }
-            UserDefaults.standard.set(key, forKey: "robo.license.key")
+
+            UserDefaults.standard.set(key.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "robo.license.key")
             UserDefaults.standard.set(result.expires_at, forKey: "robo.license.expiry")
+            errorMessage = nil
         } catch {
             license = nil
-            errorMessage = error.localizedDescription
+            errorMessage = "Unable to verify license. Please try again."
         }
     }
 
@@ -79,33 +95,75 @@ final class RoboAPI: ObservableObject {
         isLoading = true
         errorMessage = nil
         defer { isLoading = false }
+
         do {
-            var components = URLComponents(url: roboAPIBase.appendingPathComponent("api/public/v1/patch/options"), resolvingAgainstBaseURL: false)!
+            var components = URLComponents(
+                url: roboAPIBase.appendingPathComponent("api/public/v1/patch/options"),
+                resolvingAgainstBaseURL: false
+            )!
             components.queryItems = [URLQueryItem(name: "category", value: category)]
+
             let (data, response) = try await URLSession.shared.data(from: components.url!)
             guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
                 throw URLError(.badServerResponse)
             }
+
             let result = try JSONDecoder().decode(RoboPatchResponse.self, from: data)
             patches = result.categories.flatMap(\.options).filter { $0.selectable || $0.has_file }
+
+            // The UI never opens the signed URL. Available patch files are
+            // downloaded into the app's private patch library automatically.
+            await downloadAvailablePatches()
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = "Unable to load patches."
+        }
+    }
+
+    func downloadAvailablePatches() async {
+        for patch in patches where patch.has_file {
+            await downloadPatch(patch)
+        }
+    }
+
+    private func downloadPatch(_ patch: RoboPatchOption) async {
+        guard let raw = patch.download_url, let url = URL(string: raw) else {
+            patchDownloadState[patch.id] = "Unavailable"
+            return
+        }
+
+        if patchDownloadState[patch.id] == "Downloaded" { return }
+        patchDownloadState[patch.id] = "Downloading…"
+
+        do {
+            let (data, response) = try await URLSession.shared.data(from: url)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                throw URLError(.badServerResponse)
+            }
+
+            let root = try FileManager.default.url(
+                for: .applicationSupportDirectory,
+                in: .userDomainMask,
+                appropriateFor: nil,
+                create: true
+            ).appendingPathComponent("ROBO iOS/Patches", isDirectory: true)
+
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+            let safeName = (patch.file_name?.isEmpty == false ? patch.file_name! : patch.id) + ".downloaded"
+            let destination = root.appendingPathComponent(safeName)
+            try data.write(to: destination, options: .atomic)
+
+            patchDownloadState[patch.id] = "Downloaded"
+        } catch {
+            patchDownloadState[patch.id] = "Retrying…"
         }
     }
 
     func clearLicense() {
         license = nil
+        errorMessage = nil
         UserDefaults.standard.removeObject(forKey: "robo.license.key")
         UserDefaults.standard.removeObject(forKey: "robo.license.expiry")
-    }
-}
-
-enum RoboError: LocalizedError {
-    case invalidLicense
-    var errorDescription: String? {
-        switch self {
-        case .invalidLicense: return "License is not active or is not valid for this device."
-        }
     }
 }
 
@@ -130,15 +188,20 @@ struct ContentView: View {
     @State private var accent = Color(red: 0.25, green: 0.65, blue: 1.0)
     @State private var appearance = 0
     @State private var showChangeLicense = false
-    @State private var copied = false
 
-    private var storedKey: String { UserDefaults.standard.string(forKey: "robo.license.key") ?? "" }
-    private var isLicensed: Bool { api.license?.valid == true && api.license?.status?.lowercased() == "active" }
+    private var storedKey: String {
+        UserDefaults.standard.string(forKey: "robo.license.key") ?? ""
+    }
+
+    private var isLicensed: Bool {
+        api.license?.valid == true && api.license?.status?.lowercased() == "active"
+    }
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
             StarField()
+
             if isLicensed {
                 mainInterface
             } else {
@@ -159,71 +222,98 @@ struct ContentView: View {
         VStack(spacing: 0) {
             Group {
                 switch tab {
-                case 0: FunctionsView(api: api, game: $game, accent: accent)
-                case 1: AccountView(api: api, showChangeLicense: $showChangeLicense, accent: accent)
-                case 2: RuntimeView(accent: accent)
-                default: SettingsViewRobo(accent: $accent, appearance: $appearance)
+                case 0:
+                    FunctionsView(api: api, game: $game, accent: accent)
+                case 1:
+                    AccountView(api: api, showChangeLicense: $showChangeLicense, accent: accent)
+                case 2:
+                    RuntimeView(accent: accent)
+                default:
+                    SettingsViewRobo(accent: $accent, appearance: $appearance)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            HStack(spacing: 8) {
+            HStack(spacing: 4) {
                 RoboTab(title: "Functions", icon: "square.grid.2x2.fill", selected: tab == 0, accent: accent) { tab = 0 }
                 RoboTab(title: "Account", icon: "person.crop.circle.fill", selected: tab == 1, accent: accent) { tab = 1 }
                 RoboTab(title: "Runtime", icon: "waveform.path.ecg", selected: tab == 2, accent: accent) { tab = 2 }
                 RoboTab(title: "Settings", icon: "gearshape.fill", selected: tab == 3, accent: accent) { tab = 3 }
             }
             .padding(8)
-            .background(Color(white: 0.055))
+            .background(Color.white.opacity(0.045))
             .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .stroke(Color.white.opacity(0.035), lineWidth: 1)
+            }
             .padding(.horizontal, 12)
             .padding(.bottom, 8)
         }
     }
 
     private var licenseScreen: some View {
-        VStack(spacing: 24) {
-            Spacer()
-            Text("ROBO iOS")
-                .font(.system(size: 38, weight: .bold, design: .rounded))
-            Text("Play Beyond Limits")
-                .foregroundStyle(.secondary)
-            VStack(spacing: 12) {
-                HStack {
-                    Image(systemName: "key.fill").foregroundStyle(accent)
-                    Group {
-                        if showKey { TextField("License Key", text: $key) }
-                        else { SecureField("License Key", text: $key) }
+        ScrollView {
+            VStack(spacing: 20) {
+                Spacer(minLength: 60)
+
+                Text("ROBO iOS")
+                    .font(.system(size: 40, weight: .bold, design: .rounded))
+
+                Text("Play Beyond Limits")
+                    .foregroundStyle(.secondary)
+
+                VStack(spacing: 14) {
+                    HStack(spacing: 12) {
+                        Image(systemName: "key.fill")
+                            .foregroundStyle(accent)
+
+                        Group {
+                            if showKey {
+                                TextField("License Key", text: $key)
+                            } else {
+                                SecureField("License Key", text: $key)
+                            }
+                        }
+
+                        Button { showKey.toggle() } label: {
+                            Image(systemName: showKey ? "eye.slash.fill" : "eye.fill")
+                        }
                     }
-                    Button { showKey.toggle() } label: {
-                        Image(systemName: showKey ? "eye.slash.fill" : "eye.fill")
+                    .padding(16)
+                    .background(Color.white.opacity(0.055))
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+
+                    Button {
+                        Task { await api.verify(key: key) }
+                    } label: {
+                        HStack {
+                            if api.isLoading { ProgressView().tint(.white) }
+                            Text("Continue")
+                        }
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 15)
                     }
+                    .buttonStyle(.borderedProminent)
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                 }
-                .padding(16)
-                .background(Color(white: 0.08))
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                Button {
-                    Task { await api.verify(key: key) }
-                } label: {
-                    HStack {
-                        if api.isLoading { ProgressView().tint(.white) }
-                        Text("Continue")
-                    }
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 15)
+
+                if let error = api.errorMessage {
+                    Text(error)
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.red)
+                        .multilineTextAlignment(.center)
                 }
-                .buttonStyle(.borderedProminent)
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+
+                Text("Supported: iOS 16 and newer")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+
+                Spacer(minLength: 40)
             }
-            .padding(18)
-            if let error = api.errorMessage { Text(error).font(.footnote).foregroundStyle(.red).multilineTextAlignment(.center) }
-            Text("Supported: iOS 16 and newer")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-            Spacer()
+            .padding(22)
         }
-        .padding(22)
     }
 }
 
@@ -231,56 +321,72 @@ private struct FunctionsView: View {
     @ObservedObject var api: RoboAPI
     @Binding var game: Int
     let accent: Color
-    private let games = [("Free Fire", "free_fire_india"), ("Free Fire Max", "BGMI")]
+
+    // UI labels are intentionally independent from backend category names.
+    private let games = [
+        ("Free Fire", "free_fire_india"),
+        ("Free Fire Max", "BGMI")
+    ]
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                header
+                Text("ROBO iOS")
+                    .font(.system(size: 32, weight: .bold, design: .rounded))
+
+                Text("Functions")
+                    .foregroundStyle(.secondary)
+
+                VideoBanner()
+                    .frame(height: 165)
+                    .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+
                 HStack(spacing: 10) {
                     ForEach(0..<games.count, id: \.self) { index in
-                        Button { game = index; Task { await api.loadPatches(category: games[index].1) } } label: {
+                        Button {
+                            game = index
+                            Task { await api.loadPatches(category: games[index].1) }
+                        } label: {
                             Text(games[index].0)
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(game == index ? .white : .secondary)
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 12)
-                                .background(game == index ? accent.opacity(0.22) : Color(white: 0.07))
+                                .background(
+                                    game == index
+                                        ? accent.opacity(0.20)
+                                        : Color.white.opacity(0.055)
+                                )
                                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                         }
                     }
                 }
-                if api.isLoading { ProgressView().frame(maxWidth: .infinity).padding() }
+
+                if api.isLoading {
+                    ProgressView()
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                }
+
                 if api.patches.isEmpty && !api.isLoading {
                     EmptyPatchCard()
                 } else {
                     ForEach(api.patches) { patch in
-                        PatchCard(patch: patch, accent: accent)
+                        PatchCard(
+                            patch: patch,
+                            accent: accent,
+                            state: api.patchDownloadState[patch.id]
+                        )
                     }
                 }
             }
             .padding(18)
         }
-        .refreshable { await api.loadPatches(category: games[game].1) }
-        .onAppear { Task { await api.loadPatches(category: games[game].1) } }
-    }
-
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("ROBO iOS").font(.system(size: 32, weight: .bold, design: .rounded))
-            Text("Functions").foregroundStyle(.secondary)
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(LinearGradient(colors: [Color(white: 0.13), Color(white: 0.045)], startPoint: .topLeading, endPoint: .bottomTrailing))
-                .frame(height: 155)
-                .overlay {
-                    VStack(alignment: .leading) {
-                        Spacer()
-                        Text("Play Beyond Limits").font(.title3.bold())
-                        Text("Online patch options").font(.footnote).foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(20)
-                }
+        .refreshable {
+            await api.loadPatches(category: games[game].1)
+        }
+        .onAppear {
+            Task { await api.loadPatches(category: games[game].1) }
         }
     }
 }
@@ -288,46 +394,67 @@ private struct FunctionsView: View {
 private struct PatchCard: View {
     let patch: RoboPatchOption
     let accent: Color
-    @State private var message: String?
+    let state: String?
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(patch.name).font(.headline)
-                    Text(patch.category.replacingOccurrences(of: "_", with: " ").capitalized)
-                        .font(.caption).foregroundStyle(.secondary)
+        HStack(spacing: 14) {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(accent.opacity(0.12))
+                .frame(width: 48, height: 48)
+                .overlay {
+                    Image(systemName: "square.stack.3d.up.fill")
+                        .foregroundStyle(accent)
                 }
-                Spacer()
-                Image(systemName: patch.has_file ? "checkmark.circle.fill" : "circle.dashed")
-                    .foregroundStyle(patch.has_file ? accent : .secondary)
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(patch.name)
+                    .font(.headline)
+
+                Text(state ?? (patch.has_file ? "Preparing…" : "Unavailable"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
-            Button {
-                guard let raw = patch.download_url, let url = URL(string: raw) else { message = "Patch file is not available."; return }
-                UIApplication.shared.open(url)
-            } label: {
-                Text("Download")
-                    .font(.subheadline.weight(.bold))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
+
+            Spacer()
+
+            if state == "Downloaded" {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(accent)
+            } else if state == "Downloading…" || state == "Retrying…" {
+                ProgressView()
+            } else {
+                Image(systemName: patch.has_file ? "arrow.down.circle" : "circle.dashed")
+                    .foregroundStyle(.secondary)
             }
-            .buttonStyle(.borderedProminent)
-            if let message { Text(message).font(.caption).foregroundStyle(.secondary) }
         }
         .padding(16)
-        .background(Color(white: 0.075))
+        .background(Color.white.opacity(0.055))
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(Color.white.opacity(0.025), lineWidth: 1)
+        }
     }
 }
 
 private struct EmptyPatchCard: View {
     var body: some View {
         VStack(spacing: 8) {
-            Image(systemName: "square.stack.3d.up.slash").font(.title2).foregroundStyle(.secondary)
-            Text("No patches available").font(.headline)
-            Text("New online patches will appear here automatically.").font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            Image(systemName: "square.stack.3d.up.slash")
+                .font(.title2)
+                .foregroundStyle(.secondary)
+
+            Text("No patches available")
+                .font(.headline)
+
+            Text("New online patches will appear here automatically.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
         }
-        .frame(maxWidth: .infinity).padding(32)
-        .background(Color(white: 0.07))
+        .frame(maxWidth: .infinity)
+        .padding(32)
+        .background(Color.white.opacity(0.045))
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
 }
@@ -338,48 +465,102 @@ private struct AccountView: View {
     let accent: Color
     @State private var reveal = false
     @State private var copied = false
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                Text("ROBO iOS").font(.system(size: 32, weight: .bold, design: .rounded))
-                Text("Play Beyond Limits").foregroundStyle(.secondary)
-                section("DEVICE") {
+                Text("ROBO iOS")
+                    .font(.system(size: 32, weight: .bold, design: .rounded))
+
+                Text("Play Beyond Limits")
+                    .foregroundStyle(.secondary)
+
+                accountSection("DEVICE") {
                     InfoRow(title: "Device supported", value: "Supported", icon: "checkmark.shield.fill", accent: accent)
                     InfoRow(title: "Model", value: RoboDevice.model, icon: "iphone", accent: accent)
                     InfoRow(title: "iOS Version", value: RoboDevice.ios, icon: "gear", accent: accent)
                     InfoRow(title: "Build", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "-", icon: "number", accent: accent)
                 }
-                section("LICENSE") {
-                    HStack {
-                        VStack(alignment: .leading) {
-                            Text("License Key").font(.caption).foregroundStyle(.secondary)
-                            Text(reveal ? (api.license?.key ?? "-") : "••••••••••••••••")
-                                .font(.system(.body, design: .monospaced)).lineLimit(1)
+
+                accountSection("LICENSE") {
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text("License Key")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+
+                            Text(reveal ? (api.license?.key ?? storedKey) : "••••••••••••••••")
+                                .font(.system(.body, design: .monospaced))
+                                .lineLimit(1)
                         }
+
                         Spacer()
-                        Button { reveal.toggle() } label: { Image(systemName: reveal ? "eye.slash.fill" : "eye.fill") }
+
+                        Button { reveal.toggle() } label: {
+                            Image(systemName: reveal ? "eye.slash.fill" : "eye.fill")
+                        }
+
                         Button {
-                            UIPasteboard.general.string = api.license?.key
+                            UIPasteboard.general.string = api.license?.key ?? storedKey
                             copied = true
-                        } label: { Image(systemName: copied ? "checkmark" : "doc.on.doc") }
+                        } label: {
+                            Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                        }
                     }
-                    if let expiry = api.license?.expires_at { Text("Expiry: \(expiry)").font(.caption).foregroundStyle(.secondary) }
-                    Button("Change License") { showChangeLicense = true }
-                        .buttonStyle(.bordered)
-                        .sheet(isPresented: $showChangeLicense) { ChangeLicenseView(api: api) }
+
+                    if let days = api.license?.days_remaining {
+                        Text(days == 1 ? "1 day remaining" : "\(days) days remaining")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if let expiry = api.license?.expires_at {
+                        Text("Expiry: \(expiry)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Button("Change License") {
+                        showChangeLicense = true
+                    }
+                    .foregroundStyle(accent)
+                    .sheet(isPresented: $showChangeLicense) {
+                        ChangeLicenseView(api: api)
+                    }
                 }
-                section("APP") {
+
+                accountSection("APP") {
                     InfoRow(title: "Name", value: "ROBO iOS", icon: "app.fill", accent: accent)
                     InfoRow(title: "Version", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "-", icon: "info.circle.fill", accent: accent)
                 }
-            }.padding(18)
+            }
+            .padding(18)
         }
     }
-    private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title).font(.caption.weight(.bold)).foregroundStyle(.secondary)
-            VStack(spacing: 0) { content() }
-                .padding(4).background(Color(white: 0.07)).clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+
+    private var storedKey: String {
+        UserDefaults.standard.string(forKey: "robo.license.key") ?? "-"
+    }
+
+    private func accountSection<Content: View>(
+        _ title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Text(title)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.secondary)
+
+            VStack(spacing: 0) {
+                content()
+            }
+            .padding(4)
+            .background(Color.white.opacity(0.045))
+            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .stroke(Color.white.opacity(0.02), lineWidth: 1)
+            }
         }
     }
 }
@@ -388,13 +569,40 @@ private struct ChangeLicenseView: View {
     @ObservedObject var api: RoboAPI
     @Environment(\.dismiss) private var dismiss
     @State private var key = ""
+
     var body: some View {
-        NavigationStack {
+        ZStack {
+            Color.black.ignoresSafeArea()
+
             VStack(spacing: 16) {
-                TextField("ROBO license key", text: $key).textInputAutocapitalization(.characters).padding(14).background(Color(white: 0.08)).clipShape(RoundedRectangle(cornerRadius: 16))
-                Button("Verify") { Task { await api.verify(key: key); if api.license != nil { dismiss() } } }.buttonStyle(.borderedProminent)
+                Text("Change License")
+                    .font(.title2.bold())
+
+                TextField("ROBO license key", text: $key)
+                    .textInputAutocapitalization(.characters)
+                    .padding(14)
+                    .background(Color.white.opacity(0.055))
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+                Button("Verify") {
+                    Task {
+                        await api.verify(key: key)
+                        if api.license?.valid == true && api.license?.status?.lowercased() == "active" {
+                            dismiss()
+                        }
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+
+                if let error = api.errorMessage {
+                    Text(error)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                }
+
                 Spacer()
-            }.padding(20).navigationTitle("Change License").navigationBarTitleDisplayMode(.inline)
+            }
+            .padding(20)
         }
         .preferredColorScheme(.dark)
     }
@@ -402,62 +610,222 @@ private struct ChangeLicenseView: View {
 
 private struct RuntimeView: View {
     let accent: Color
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Runtime").font(.system(size: 32, weight: .bold, design: .rounded))
-            Text("Runtime logs are ready for the next module.").foregroundStyle(.secondary)
-            RoundedRectangle(cornerRadius: 20, style: .continuous).fill(Color(white: 0.07)).frame(maxWidth: .infinity, minHeight: 220).overlay {
-                VStack(spacing: 8) { Image(systemName: "waveform.path.ecg").font(.largeTitle).foregroundStyle(accent); Text("No runtime events yet").foregroundStyle(.secondary) }
-            }
+            Text("Runtime")
+                .font(.system(size: 32, weight: .bold, design: .rounded))
+
+            Text("Runtime logs")
+                .foregroundStyle(.secondary)
+
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(Color.white.opacity(0.045))
+                .frame(maxWidth: .infinity, minHeight: 220)
+                .overlay {
+                    VStack(spacing: 8) {
+                        Image(systemName: "waveform.path.ecg")
+                            .font(.largeTitle)
+                            .foregroundStyle(accent)
+
+                        Text("No runtime events yet")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
             Spacer()
-        }.padding(18)
+        }
+        .padding(18)
     }
 }
 
 private struct SettingsViewRobo: View {
     @Binding var accent: Color
     @Binding var appearance: Int
+
     @AppStorage("robo.language") private var language = "English"
     @AppStorage("robo.streamer") private var streamer = false
     @AppStorage("robo.calculator") private var calculator = false
+
     var body: some View {
-        Form {
-            Section("Appearance") {
-                Picker("Theme", selection: $appearance) { Text("Dark").tag(0); Text("System").tag(1) }
-                ColorPicker("Accent Color", selection: $accent, supportsOpacity: false)
-                Text("Default accent: light blue with glow").font(.caption).foregroundStyle(.secondary)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                Text("Settings")
+                    .font(.system(size: 32, weight: .bold, design: .rounded))
+
+                settingsSection("APPEARANCE") {
+                    Picker("Theme", selection: $appearance) {
+                        Text("Dark").tag(0)
+                        Text("System").tag(1)
+                    }
+                    .pickerStyle(.segmented)
+
+                    ColorPicker("Accent Color", selection: $accent, supportsOpacity: false)
+                    Text("Default accent is light blue with a soft glow.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                settingsSection("LANGUAGE") {
+                    Picker("Language", selection: $language) {
+                        Text("English").tag("English")
+                        Text("Chinese").tag("Chinese")
+                        Text("Vietnamese").tag("Vietnamese")
+                        Text("Korean").tag("Korean")
+                    }
+                }
+
+                settingsSection("MODES") {
+                    Toggle("Streamer Mode", isOn: $streamer)
+                    Toggle("Calculator Mode", isOn: $calculator)
+                }
+
+                settingsSection("COMPATIBILITY") {
+                    InfoRow(title: "Device", value: RoboDevice.model, icon: "iphone", accent: accent)
+                    InfoRow(title: "iOS", value: RoboDevice.ios, icon: "gear", accent: accent)
+                    InfoRow(title: "Support", value: "iOS 16+", icon: "checkmark.shield.fill", accent: accent)
+                }
             }
-            Section("Language") {
-                Picker("Language", selection: $language) { Text("English").tag("English"); Text("Chinese").tag("Chinese"); Text("Vietnamese").tag("Vietnamese"); Text("Korean").tag("Korean") }
-            }
-            Section("Modes") {
-                Toggle("Streamer Mode", isOn: $streamer)
-                Toggle("Calculator Mode", isOn: $calculator)
-            }
-            Section("Compatibility") {
-                LabeledContent("Device", value: RoboDevice.model)
-                LabeledContent("iOS", value: RoboDevice.ios)
-                LabeledContent("Support", value: "iOS 16+")
-            }
-            Section("About") { Text("ROBO iOS").font(.headline); Text("Public client: license verification + online patch options").font(.caption).foregroundStyle(.secondary) }
+            .padding(18)
         }
-        .scrollContentBackground(.hidden)
-        .background(Color.black)
-        .navigationTitle("Settings")
+    }
+
+    private func settingsSection<Content: View>(
+        _ title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Text(title)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 14) {
+                content()
+            }
+            .padding(15)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.white.opacity(0.045))
+            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        }
     }
 }
 
 private struct InfoRow: View {
-    let title: String; let value: String; let icon: String; let accent: Color
+    let title: String
+    let value: String
+    let icon: String
+    let accent: Color
+
     var body: some View {
-        HStack(spacing: 12) { Image(systemName: icon).foregroundStyle(accent).frame(width: 22); VStack(alignment: .leading) { Text(title).font(.caption).foregroundStyle(.secondary); Text(value).font(.subheadline) }; Spacer() }.padding(12)
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .foregroundStyle(accent)
+                .frame(width: 22)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Text(value)
+                    .font(.subheadline)
+            }
+
+            Spacer()
+        }
+        .padding(12)
     }
 }
 
 private struct RoboTab: View {
-    let title: String; let icon: String; let selected: Bool; let accent: Color; let action: () -> Void
+    let title: String
+    let icon: String
+    let selected: Bool
+    let accent: Color
+    let action: () -> Void
+
     var body: some View {
-        Button(action: action) { VStack(spacing: 4) { Image(systemName: icon); Text(title).font(.caption2.weight(.semibold)) }.foregroundStyle(selected ? accent : .secondary).frame(maxWidth: .infinity).padding(.vertical, 7) }
+        Button(action: action) {
+            VStack(spacing: 4) {
+                Image(systemName: icon)
+                Text(title)
+                    .font(.caption2.weight(.semibold))
+            }
+            .foregroundStyle(selected ? accent : .secondary)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 7)
+        }
+    }
+}
+
+private struct VideoBanner: View {
+    @State private var player: AVPlayer?
+
+    private let candidates = [
+        "Functionscreen",
+        "banner-red",
+        "banner-blue",
+        "banner-gold",
+        "banner-green",
+        "banner-orange"
+    ]
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.10, green: 0.12, blue: 0.20),
+                            Color(red: 0.025, green: 0.025, blue: 0.035)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+
+            if let player {
+                VideoPlayer(player: player)
+                    .disabled(true)
+                    .onAppear {
+                        player.play()
+                        player.actionAtItemEnd = .none
+                        NotificationCenter.default.addObserver(
+                            forName: .AVPlayerItemDidPlayToEndTime,
+                            object: player.currentItem,
+                            queue: .main
+                        ) { _ in
+                            player.seek(to: .zero)
+                            player.play()
+                        }
+                    }
+                    .onDisappear {
+                        player.pause()
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            } else {
+                VStack(alignment: .leading, spacing: 6) {
+                    Spacer()
+                    Text("ROBO iOS")
+                        .font(.title.bold())
+                    Text("Play Beyond Limits")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(20)
+            }
+        }
+        .onAppear {
+            guard player == nil else { return }
+
+            for name in candidates {
+                if let url = Bundle.main.url(forResource: name, withExtension: "mov") {
+                    player = AVPlayer(url: url)
+                    break
+                }
+            }
+        }
     }
 }
 
@@ -467,11 +835,16 @@ private struct StarField: View {
             Canvas { ctx, size in
                 let seed = Int(context.date.timeIntervalSince1970 * 3)
                 var rng = SeededRandom(seed: seed)
+
                 for _ in 0..<70 {
                     let x = CGFloat(rng.next()) * size.width
                     let y = CGFloat(rng.next()) * size.height
                     let r = CGFloat(rng.next()) * 1.4 + 0.3
-                    ctx.fill(Path(ellipseIn: CGRect(x: x, y: y, width: r, height: r)), with: .color(.white.opacity(0.22)))
+
+                    ctx.fill(
+                        Path(ellipseIn: CGRect(x: x, y: y, width: r, height: r)),
+                        with: .color(.white.opacity(0.22))
+                    )
                 }
             }
         }
@@ -482,6 +855,15 @@ private struct StarField: View {
 
 private struct SeededRandom {
     var state: UInt64
-    init(seed: Int) { state = UInt64(bitPattern: Int64(seed)) &* 2862933555777941757 &+ 3037000493 }
-    mutating func next() -> Double { state = state &* 2862933555777941757 &+ 3037000493; return Double(state % 10000) / 10000.0 }
+
+    init(seed: Int) {
+        state = UInt64(bitPattern: Int64(seed))
+            &* 2862933555777941757
+            &+ 3037000493
+    }
+
+    mutating func next() -> Double {
+        state = state &* 2862933555777941757 &+ 3037000493
+        return Double(state % 10000) / 10000.0
+    }
 }
