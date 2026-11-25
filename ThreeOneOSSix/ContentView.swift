@@ -44,6 +44,7 @@ final class RoboAPI: ObservableObject {
     @Published var isLoading = false
     @Published var errorMessage: String?
     @Published var patchDownloadState: [String: String] = [:]
+    @Published var patchEnabled: [String: Bool] = [:]
 
     func verify(key: String) async {
         isLoading = true
@@ -121,8 +122,26 @@ final class RoboAPI: ObservableObject {
 
     func downloadAvailablePatches() async {
         for patch in patches where patch.has_file {
+            loadPatchPreference(for: patch)
             await downloadPatch(patch)
         }
+    }
+
+    func loadPatchPreference(for patch: RoboPatchOption) {
+        let key = "robo.patch.enabled.\(patch.id)"
+        if UserDefaults.standard.object(forKey: key) == nil {
+            UserDefaults.standard.set(false, forKey: key)
+            patchEnabled[patch.id] = false
+        } else {
+            patchEnabled[patch.id] = UserDefaults.standard.bool(forKey: key)
+        }
+    }
+
+    func setPatchEnabled(_ enabled: Bool, for patch: RoboPatchOption) {
+        // This toggle only persists the app's patch-selection state.
+        // It does not execute device/game modification code.
+        patchEnabled[patch.id] = enabled
+        UserDefaults.standard.set(enabled, forKey: "robo.patch.enabled.\(patch.id)")
     }
 
     private func downloadPatch(_ patch: RoboPatchOption) async {
@@ -378,7 +397,11 @@ private struct FunctionsView: View {
                         PatchCard(
                             patch: patch,
                             accent: accent,
-                            state: api.patchDownloadState[patch.id]
+                            state: api.patchDownloadState[patch.id],
+                            enabled: api.patchEnabled[patch.id] ?? false,
+                            onToggle: { enabled in
+                                api.setPatchEnabled(enabled, for: patch)
+                            }
                         )
                     }
                 }
@@ -398,6 +421,8 @@ private struct PatchCard: View {
     let patch: RoboPatchOption
     let accent: Color
     let state: String?
+    let enabled: Bool
+    let onToggle: (Bool) -> Void
 
     var body: some View {
         HStack(spacing: 14) {
@@ -421,8 +446,17 @@ private struct PatchCard: View {
             Spacer()
 
             if state == "Downloaded" {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(accent)
+                VStack(spacing: 6) {
+                    Toggle("", isOn: Binding(
+                        get: { enabled },
+                        set: onToggle
+                    ))
+                    .labelsHidden()
+                    .tint(accent)
+                    Text(enabled ? "ON" : "OFF")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(enabled ? accent : .white.opacity(0.55))
+                }
             } else if state == "Downloading…" || state == "Retrying…" {
                 ProgressView()
             } else {
