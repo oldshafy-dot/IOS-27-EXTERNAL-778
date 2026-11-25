@@ -186,8 +186,7 @@ struct ContentView: View {
     @State private var key = ""
     @State private var showKey = false
     @State private var accent = Color(red: 0.25, green: 0.65, blue: 1.0)
-    @State private var appearance = 0
-    @State private var showChangeLicense = false
+        @State private var showChangeLicense = false
 
     private var storedKey: String {
         UserDefaults.standard.string(forKey: "robo.license.key") ?? ""
@@ -228,7 +227,7 @@ struct ContentView: View {
                 case 2:
                     RuntimeView(accent: accent)
                 default:
-                    SettingsViewRobo(accent: $accent, appearance: $appearance)
+                    SettingsViewRobo(accent: $accent)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -257,7 +256,7 @@ struct ContentView: View {
                 Spacer(minLength: 34)
 
                 Text("ROBO iOS")
-                    .font(.system(size: 40, weight: .bold, design: .rounded))
+                    .font(.system(size: 40, weight: .heavy, design: .rounded))
 
                 Text("Play Beyond Limits")
                     .foregroundStyle(.secondary)
@@ -280,8 +279,12 @@ struct ContentView: View {
                         }
                     }
                     .padding(16)
-                    .background(Color.clear)
+                    .background(.ultraThinMaterial.opacity(0.16))
                     .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .stroke(Color.white.opacity(0.035), lineWidth: 1)
+                    }
 
                     Button {
                         Task { await api.verify(key: key) }
@@ -334,6 +337,7 @@ private struct FunctionsView: View {
                     .font(.system(size: 32, weight: .bold, design: .rounded))
 
                 Text("Functions")
+                    .font(.subheadline.weight(.medium))
                     .foregroundStyle(.secondary)
 
                 VideoBanner()
@@ -427,11 +431,11 @@ private struct PatchCard: View {
             }
         }
         .padding(16)
-        .background(Color.clear)
+        .background(.ultraThinMaterial.opacity(0.10))
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(Color.white.opacity(0.012), lineWidth: 1)
+                .stroke(Color.white.opacity(0.025), lineWidth: 1)
         }
     }
 }
@@ -603,8 +607,7 @@ private struct ChangeLicenseView: View {
             }
             .padding(20)
         }
-        .preferredColorScheme(.dark)
-    }
+            }
 }
 
 private struct RuntimeView: View {
@@ -640,9 +643,11 @@ private struct RuntimeView: View {
 
 private struct SettingsViewRobo: View {
     @Binding var accent: Color
-    @Binding var appearance: Int
+    @AppStorage(AppLanguage.storageKey) private var languageCode = AppLanguage.english.rawValue
 
-    @AppStorage("robo.language") private var language = "English"
+    private var language: String {
+        languageCode
+    }
 
     var body: some View {
         ScrollView {
@@ -652,13 +657,13 @@ private struct SettingsViewRobo: View {
 
                 settingsSection("APPEARANCE") {
                     ColorPicker("Accent Color", selection: $accent, supportsOpacity: false)
-                    Text("ROBO keeps its custom dark appearance regardless of the system appearance setting.")
+                    Text("ROBO uses its custom dark appearance and ignores the system Light/Dark setting.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
 
                 settingsSection("LANGUAGE") {
-                    Picker("Language", selection: $language) {
+                    Picker("Language", selection: $languageCode) {
                         Text("English").tag("English")
                         Text("Chinese").tag("Chinese")
                         Text("Vietnamese").tag("Vietnamese")
