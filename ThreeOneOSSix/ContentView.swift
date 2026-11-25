@@ -208,7 +208,6 @@ struct ContentView: View {
                 licenseScreen
             }
         }
-        .preferredColorScheme(.dark)
         .tint(accent)
         .onAppear {
             if key.isEmpty { key = storedKey }
@@ -248,14 +247,14 @@ struct ContentView: View {
                     .stroke(Color.white.opacity(0.015), lineWidth: 1)
             }
             .padding(.horizontal, 12)
-            .padding(.bottom, 8)
+            .padding(.bottom, 18)
         }
     }
 
     private var licenseScreen: some View {
         ScrollView {
             VStack(spacing: 20) {
-                Spacer(minLength: 60)
+                Spacer(minLength: 34)
 
                 Text("ROBO iOS")
                     .font(.system(size: 40, weight: .bold, design: .rounded))
@@ -289,7 +288,7 @@ struct ContentView: View {
                     } label: {
                         HStack {
                             if api.isLoading { ProgressView().tint(.white) }
-                            Text("Continue")
+                            Text("Activate")
                         }
                         .font(.headline)
                         .frame(maxWidth: .infinity)
@@ -398,11 +397,11 @@ private struct PatchCard: View {
 
     var body: some View {
         HStack(spacing: 14) {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(accent.opacity(0.12))
+            Circle()
+                .fill(accent.opacity(0.10))
                 .frame(width: 48, height: 48)
                 .overlay {
-                    Image(systemName: "square.stack.3d.up.fill")
+                    Image(systemName: "scope")
                         .foregroundStyle(accent)
                 }
 
@@ -644,8 +643,6 @@ private struct SettingsViewRobo: View {
     @Binding var appearance: Int
 
     @AppStorage("robo.language") private var language = "English"
-    @AppStorage("robo.streamer") private var streamer = false
-    @AppStorage("robo.calculator") private var calculator = false
 
     var body: some View {
         ScrollView {
@@ -654,14 +651,8 @@ private struct SettingsViewRobo: View {
                     .font(.system(size: 32, weight: .bold, design: .rounded))
 
                 settingsSection("APPEARANCE") {
-                    Picker("Theme", selection: $appearance) {
-                        Text("Dark").tag(0)
-                        Text("System").tag(1)
-                    }
-                    .pickerStyle(.segmented)
-
                     ColorPicker("Accent Color", selection: $accent, supportsOpacity: false)
-                    Text("Default accent is light blue with a soft glow.")
+                    Text("ROBO keeps its custom dark appearance regardless of the system appearance setting.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -673,11 +664,6 @@ private struct SettingsViewRobo: View {
                         Text("Vietnamese").tag("Vietnamese")
                         Text("Korean").tag("Korean")
                     }
-                }
-
-                settingsSection("MODES") {
-                    Toggle("Streamer Mode", isOn: $streamer)
-                    Toggle("Calculator Mode", isOn: $calculator)
                 }
 
                 settingsSection("COMPATIBILITY") {
@@ -830,21 +816,21 @@ private struct VideoBanner: View {
 }
 
 private struct StarField: View {
+    private let stars: [(CGFloat, CGFloat, CGFloat, Double)] = [
+        (0.08,0.12,1.1,0.30),(0.21,0.22,0.7,0.20),(0.34,0.08,0.9,0.24),(0.48,0.18,0.6,0.18),
+        (0.63,0.10,1.0,0.28),(0.78,0.24,0.7,0.19),(0.91,0.13,1.0,0.25),(0.14,0.42,0.6,0.16),
+        (0.29,0.53,1.0,0.22),(0.57,0.44,0.7,0.18),(0.74,0.57,0.9,0.21),(0.88,0.47,0.6,0.17),
+        (0.06,0.73,0.8,0.20),(0.22,0.84,0.6,0.16),(0.43,0.72,1.0,0.23),(0.67,0.80,0.7,0.18),
+        (0.84,0.72,0.9,0.22),(0.94,0.88,0.6,0.17)
+    ]
+
     var body: some View {
-        TimelineView(.animation(minimumInterval: 0.15)) { context in
+        GeometryReader { _ in
             Canvas { ctx, size in
-                let seed = Int(context.date.timeIntervalSince1970 * 3)
-                var rng = SeededRandom(seed: seed)
-
-                for _ in 0..<70 {
-                    let x = CGFloat(rng.next()) * size.width
-                    let y = CGFloat(rng.next()) * size.height
-                    let r = CGFloat(rng.next()) * 1.4 + 0.3
-
-                    ctx.fill(
-                        Path(ellipseIn: CGRect(x: x, y: y, width: r, height: r)),
-                        with: .color(.white.opacity(0.22))
-                    )
+                for (xRatio,yRatio,r,opacity) in stars {
+                    let x=xRatio*size.width, y=yRatio*size.height
+                    let rect=CGRect(x:x-r/2,y:y-r/2,width:r,height:r)
+                    ctx.fill(Path(ellipseIn: rect), with: .color(.white.opacity(opacity)))
                 }
             }
         }
